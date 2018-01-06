@@ -12,7 +12,7 @@ import numpy
         the algorithm is trying to install modules on the next path
 '''
 
-cap = 4  # module capacity [Gbps]
+cap = 5  # module capacity [Gbps]
 u_max = 10  # max number of modules per link are allowed
 budget = 100000
 
@@ -146,7 +146,7 @@ def divide_traffic(graph, paths, tmp_budget):
                     modules_no = 1
                     free_cap = graph[p['path'][i]][p['path'][i+1]]['free_cap']
                     if p['demand'] > free_cap:  # if the demand is greater than free capacity on any of the links in the path
-                        if path_num==1: #free_cap > 0 and # jesli jest to pierwsza rozwazana sciezka dla danych 2 miast, to oblicz z ogolnego wzoru, jak nie, to wez decreased;aclpfca[...
+                        if path_num == 1 or u_max == 10:
                             lack_of_cap = p['demand'] - free_cap
                         else:
                             lack_of_cap = decreased_lack_of_cap

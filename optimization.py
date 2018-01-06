@@ -1,7 +1,6 @@
 import networkx as nx
 import xml.etree.ElementTree as ET
 import math
-import matplotlib.pyplot as plt
 import numpy
 
 '''
@@ -13,14 +12,13 @@ import numpy
         the algorithm is trying to install modules on the next path
 '''
 
-cap = 3.5  # module capacity [Gbps]
+cap = 5  # module capacity [Gbps]
 # TODO - fix bug with u_max
-u_max = 10  # max number of modules per link are allowed
+u_max = 8  # max number of modules per link are allowed
 budget = 100000
 
 class NextPath(Exception): pass
 class NullLackOfCap(Exception): pass
-
 
 def calculate_cost (graph, city1, city2):
     # calculates cost of a link added between 2 locations
@@ -138,18 +136,19 @@ def divide_traffic(graph, paths, tmp_budget):
     # divide the traffic between paths when it cannot be handled by only one path
     # paths - dictionary variable which consists of path, demand and left capacity
     pot_budget = tmp_budget
-    j = 0
     try:
+        move_to_next_path = 0
         for p in paths:
-            j += 1
             try:
                 for i in range(0, len(p['path'])-1):
+                    move_to_next_pair = 0
                     modules_no = 1
                     free_cap = graph[p['path'][i]][p['path'][i+1]]['free_cap']
                     if p['demand'] > free_cap:  # if the demand is greater than free capacity on any of the links in the path
                         lack_of_cap = p['demand'] - free_cap
-                        if j > 1:
+                        if move_to_next_path == 1:
                             lack_of_cap = decreased_lack_of_cap
+                            move_to_next_path = 0
                         while lack_of_cap > 0:
                             if modules_no < u_max:
                                 if graph[p['path'][i]][p['path'][i+1]]['free_cap'] > 0:
@@ -161,15 +160,28 @@ def divide_traffic(graph, paths, tmp_budget):
                                     pot_budget = add_module(graph, p['path'][i], p['path'][i+1], pot_budget, res)
                                 lack_of_cap -= res
                             else:
-                                # this path lacks of modules - moving to the next path
-                                decreased_lack_of_cap = lack_of_cap
-                                raise NextPath
+                                if i+1 == len(p['path'])-1:
+                                    # this path lacks of modules - moving to the next path
+                                    decreased_lack_of_cap = lack_of_cap
+                                    move_to_next_path = 1
+                                    raise NextPath
+                                else:
+                                    # these nodes lack of modules - moving to the next pair of nodes on this path
+                                    j = 0
+                                    move_to_next_pair = 1
+                                    break
+                                    # raise NextPairOfNodes
+                            if move_to_next_pair == 1:
+                                move_to_next_pair = 0
+                                break
                         else:
                             raise NullLackOfCap
             except NextPath:
                 pass
     except NullLackOfCap:
         pass
+    if lack_of_cap > 0:
+        raise Exception("Problem unsolvable, the link still lacks of capacity but there is no more module possible to install")
     return pot_budget
 
 

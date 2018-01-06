@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy
 
 '''
- - setupCost = 0 (for existing edge) or setupCost = calculate_cost(city1,city2) (for new edge)
  - capacity = 1 (by default each path could use many edges and may consist of many vertices)
  - algorithm design:
     > firstly reserves the capacity for the most distant vertices
@@ -66,11 +65,11 @@ def draw_graph(xml_file, cap):
                 demand[vsrc_id-1][vdst_id-1] = abs(vdst_id-vsrc_id)*10  # [Gbps]
 
     for e in root.iter('{http://sndlib.zib.de/network}link'):
-        # creating a pair of edges (with attributes such as an sd, td, number of modules,setupCost and amount of free capacity)
+        # creating a pair of edges (with attributes such as an sd, td, number of modules and amount of free capacity)
         num0 = graph.node[e[0].text]['no']-1
         num1 = graph.node[e[1].text]['no']-1
-        graph.add_edge(e[0].text,e[1].text,d=demand[num0][num1],mod_no=1,setupCost=0,free_cap=cap)
-        graph.add_edge(e[1].text,e[0].text,d=demand[num1][num0],mod_no=1,setupCost=0,free_cap=cap)
+        graph.add_edge(e[0].text, e[1].text, d=demand[num0][num1], mod_no=1, free_cap=cap)
+        graph.add_edge(e[1].text, e[0].text, d=demand[num1][num0], mod_no=1, free_cap=cap)
     nx.draw(graph)
     return graph
 
@@ -89,21 +88,23 @@ def calculate_path(graph, budget, demands):
         if len(paths) == 1:  # if there is only one existing path
             modules_no = 1
             for i in range(0, len(path_dict[0]['path'])-1):
-                free_cap = graph[path_dict[0]['path'][i]][path_dict[0]['path'][i+1]]['free_cap']
+                src = path_dict[0]['path'][i]
+                dst = path_dict[0]['path'][i+1]
+                free_cap = graph[src][dst]['free_cap']
                 if attr['d'] > free_cap:  # if the demand is greater than free capacity on any of the links in the path
                     lack_of_cap = attr['d'] - free_cap
                     while lack_of_cap > 0:
                         if modules_no < u_max:
                             if graph[paths[i]][paths[i+1]]['free_cap'] > 0:
                                 res = (free_cap if lack_of_cap >= free_cap else lack_of_cap)
-                                update_module(graph, paths[i], paths[i+1], lack_of_cap, res)
+                                update_module(graph, src, dst, res)
                             else:
                                 res = (cap if lack_of_cap >= cap else lack_of_cap)
                                 modules_no += 1
                                 add_module(graph, paths[i], paths[i+1], pot_budget, res)
                             lack_of_cap -= res
                         else:
-                            raise Exception("Problem unsolvable, all ", u_max, " modules are already used on the only exisitng path")
+                            raise Exception("Problem unsolvable, all ", u_max, " modules are already used on the only existing path")
                     budget -= pot_budget
                 else:
                     # add path between the links, and decrease the free capacity on this module
@@ -114,8 +115,7 @@ def calculate_path(graph, budget, demands):
             print "There isn't any existing path for this connection. It needs to be created."
         else:
             # case for multiple paths
-            pot_budget_left = divide_traffic(graph, path_dict, pot_budget)
-            pot_budget = pot_budget_left
+            pot_budget = divide_traffic(graph, path_dict, pot_budget)
     return graph, pot_budget
 
 

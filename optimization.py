@@ -1,20 +1,23 @@
 import networkx as nx
 import xml.etree.ElementTree as ET
 import math
-import matplotlib.pyplot as plt
 import numpy
 
 '''
-assumptions:
- - setupCost = 0 (for existing edge) or setupCost = calculate_cost(city1,city2) (for new edge)
  - capacity = 1 (by default each path could use many edges and may consist of many vertices)
- // edit cap=10 (def cap=1)
+ - algorithm design:
+    > firstly reserves the capacity for the most distant vertices
+    > firstly the capacity is reserved for the shortest path
+    > if the shortest path doesn't have any modules left to install,
+        the algorithm is trying to install modules on the next path
 '''
 
-cap = 1 # module capacity [Gbps]
-u_max = 10 #max number of modules per link are allowed
+cap = 4  # module capacity [Gbps]
+u_max = 10  # max number of modules per link are allowed
 budget = 100000
 
+class NextPath(Exception): pass
+class NullLackOfCap(Exception): pass
 
 def calculate_cost (graph, city1, city2):
     # calculates cost of a link added between 2 locations
@@ -31,17 +34,17 @@ def calculate_cost (graph, city1, city2):
     dfi = math.radians(y2-y1)
     ddelta = math.radians(x2-x1)
 
-    a = math.sin(dfi/2) * math.sin(dfi/2) + math.cos(fi1) * math.cos(fi2) * math.sin(ddelta/2) * math.sin(ddelta/2);
+    a = math.sin(dfi/2) * math.sin(dfi/2) + math.cos(fi1) * math.cos(fi2) * math.sin(ddelta/2) * math.sin(ddelta/2)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    distance = int(R * c/1000) # distance in kilometers
-    return distance^2 # cost of a newly installed link between 2 locations
+    distance = int(R * c/1000)  # distance in kilometers
+    return distance ^ 2  # cost of a newly installed link between 2 locations
 
 
 def draw_graph(xml_file, cap):
     # builds a graph with existing vertices and edges
     topo = ET.parse(xml_file)
     root = topo.getroot()
-    graph = nx.DiGraph() #for directed simple graph
+    graph = nx.DiGraph()  # for directed simple graph
     i = 0
 
     for v in root.iter('{http://sndlib.zib.de/network}node'):
@@ -56,53 +59,133 @@ def draw_graph(xml_file, cap):
         for vd in graph.nodes:
             vdst_id = graph.node[vd]["no"]
             if vsrc_id != vdst_id:
-                demand[vsrc_id-1][vdst_id-1] = abs(vdst_id-vsrc_id)*10 # [Gbps]
+                demand[vsrc_id-1][vdst_id-1] = abs(vdst_id-vsrc_id)*10  # [Gbps]
 
     for e in root.iter('{http://sndlib.zib.de/network}link'):
-        #creating a pair of edges (with attributes such as an id, sd, td, capacity and setupCost)
+        # creating a pair of edges (with attributes such as an sd, td, number of modules and amount of free capacity)
         num0 = graph.node[e[0].text]['no']-1
         num1 = graph.node[e[1].text]['no']-1
-        graph.add_edge(e[0].text,e[1].text,id=e.attrib['id'],d=demand[num0][num1],capacity=cap,setupCost=0)
-        graph.add_edge(e[1].text,e[0].text,id=e.attrib['id'],d=demand[num1][num0],capacity=cap,setupCost=0)
-    #calculate_potential_path(graph.edges)
+        graph.add_edge(e[0].text, e[1].text, d=demand[num0][num1], mod_no=1, free_cap=cap)
+        graph.add_edge(e[1].text, e[0].text, d=demand[num1][num0], mod_no=1, free_cap=cap)
     nx.draw(graph)
     return graph
 
 
-def calculate_potential_path(graph, budget, demands):
+def calculate_path(graph, budget, demands):
+    # calculates optimal paths for all cities given in demands list
     pot_budget = budget
     for city1, city2, attr in demands:
-
-        modules_no = 1
-        if attr['d'] > attr['capacity']:
-            total_edge_cap = attr['capacity']
-            lack_of_cap = attr['d'] - attr['capacity']
-#            pot_best_path=graph.add_edge(city1,city2,capacity=cap+lack_of_cap)
-            while lack_of_cap>0:
-                if modules_no <= u_max:
-                    print "lackOfCap=", lack_of_cap
-                    graph.add_edge(city1, city2, capacity=cap)
-                    lack_of_cap -= cap
-                    pot_budget -= calculate_cost(graph, city1, city2) # calculated amount of budget left when the direct link between two cities is needed
-                    total_edge_cap += cap
-                    print "totalEdgeCap=", total_edge_cap
-                    modules_no += 1
+        pot_paths = nx.all_simple_paths(graph, city1, city2)
+        l_pot_paths = list(pot_paths)
+        paths = sorted(l_pot_paths, key=lambda x: len(x))
+        path_dict = []
+        for p in paths:
+            p_row = {'path': p, 'demand': attr['d']}
+            path_dict.append(p_row)
+        if len(paths) == 1:  # if there is only one existing path
+            modules_no = 1
+            for i in range(0, len(path_dict[0]['path'])-1):
+                src = path_dict[0]['path'][i]
+                dst = path_dict[0]['path'][i+1]
+                free_cap = graph[src][dst]['free_cap']
+                if attr['d'] > free_cap:  # if the demand is greater than free capacity on any of the links in the path
+                    lack_of_cap = attr['d'] - free_cap
+                    while lack_of_cap > 0:
+                        if modules_no < u_max:
+                            if graph[paths[i]][paths[i+1]]['free_cap'] > 0:
+                                res = (free_cap if lack_of_cap >= free_cap else lack_of_cap)
+                                update_module(graph, src, dst, res)
+                            else:
+                                res = (cap if lack_of_cap >= cap else lack_of_cap)
+                                modules_no += 1
+                                add_module(graph, paths[i], paths[i+1], pot_budget, res)
+                            lack_of_cap -= res
+                        else:
+                            raise Exception("Problem unsolvable, all ", u_max, " modules are already used on the only existing path")
+                    budget -= pot_budget
                 else:
-                    print "Problem unsolvable, all ", u_max ," modules are already used"
-                    break
-            print pot_budget
+                    # add path between the links, and decrease the free capacity on this module
+                    print "Link is able to handle the demand.\nCreating a direct link for (", city1, ",", city2, ")..."
+                    graph.add_path([paths[i], paths[i+1]])
+                    graph[paths[i]][paths[i+1]]['free_cap'] -= attr['d']
+        elif len(paths) == 0:
+            print "There isn't any existing path for this connection. It needs to be created."
         else:
-            print "Link is able to handle the demand.\nCreating a direct link for (", city1, ",", city2, ")..."
-#           pot_best_path=...
-            graph.add_path([city1, city2])
+            # case for multiple paths
+            pot_budget = divide_traffic(graph, path_dict, pot_budget)
+    return graph, pot_budget
 
 
-def calculate_shortest_path(graph, src, dst):
+def add_module(graph, src, dst, pot_budget, res):
+    # installs modules for link between src and dst nodes
+    pot_budget -= calculate_cost(graph, src, dst) # calculated amount of budget left when the direct link between two cities is needed
+    graph[src][dst]['free_cap'] += cap - res
+    graph[src][dst]['mod_no'] += 1
+    if pot_budget < 0:
+        raise Exception("Problem unsolvable, the budget limit has been exceeded")
+    return pot_budget
+
+
+def update_module(graph, src, dst, res):
+    # updates existing module - updates left capacity
+    graph[src][dst]['free_cap'] -= res
+
+
+def divide_traffic(graph, paths, tmp_budget):
+    # divide the traffic between paths when it cannot be handled by only one path
+    # paths - dictionary variable which consists of path, demand and left capacity
+    pot_budget = tmp_budget
     try:
-        dp = nx.dijkstra_path(graph, src, dst)
-    except nx.exception.NetworkXNoPath:
-        raise Exception('No path exists between source and target')
-    return dp
+        path_num = 0
+        move_to_next_path = 0
+        for p in paths:
+            path_num += 1
+            try:
+                for i in range(0, len(p['path'])-1):
+                    move_to_next_pair = 0
+                    modules_no = 1
+                    free_cap = graph[p['path'][i]][p['path'][i+1]]['free_cap']
+                    if p['demand'] > free_cap:  # if the demand is greater than free capacity on any of the links in the path
+                        if path_num==1: #free_cap > 0 and # jesli jest to pierwsza rozwazana sciezka dla danych 2 miast, to oblicz z ogolnego wzoru, jak nie, to wez decreased;aclpfca[...
+                            lack_of_cap = p['demand'] - free_cap
+                        else:
+                            lack_of_cap = decreased_lack_of_cap
+                        if move_to_next_path == 1:
+                            lack_of_cap = decreased_lack_of_cap
+                            move_to_next_path = 0
+                        while lack_of_cap > 0:
+                            if modules_no < u_max:
+                                if graph[p['path'][i]][p['path'][i+1]]['free_cap'] > 0:
+                                    res = (free_cap if lack_of_cap >= free_cap else lack_of_cap)
+                                    update_module(graph, p['path'][i], p['path'][i+1], res)
+                                else:
+                                    res = (cap if lack_of_cap >= cap else lack_of_cap)
+                                    modules_no += 1
+                                    pot_budget = add_module(graph, p['path'][i], p['path'][i+1], pot_budget, res)
+                                lack_of_cap -= res
+                            else:
+                                if i+1 == len(p['path'])-1:
+                                    # this path lacks of modules - moving to the next path
+                                    decreased_lack_of_cap = lack_of_cap
+                                    move_to_next_path = 1
+                                    raise NextPath
+                                else:
+                                    # these nodes lack of modules - moving to the next pair of nodes on this path
+                                    move_to_next_pair = 1
+                                    break
+                                    # raise NextPairOfNodes
+                            if move_to_next_pair == 1:
+                                move_to_next_pair = 0
+                                break
+                        else:
+                            raise NullLackOfCap
+            except NextPath:
+                pass
+    except NullLackOfCap:
+        pass
+    if lack_of_cap > 0:
+        raise Exception("Problem unsolvable, the link still lacks of capacity but there is no more module possible to install")
+    return pot_budget
 
 
 def sort_demands_desc(graph):
@@ -112,12 +195,8 @@ def sort_demands_desc(graph):
 if __name__ == "__main__":
     graph = draw_graph('polska.xml', cap)
     sorted_demands = sort_demands_desc(graph)
-   # calculate_potential_path(graph, budget, sorted_demands)
-    paths = []
-    for src in graph.nodes:
-        for dst in graph.nodes:
-            path = calculate_shortest_path(graph, src, dst)
-            if len(path) > 1:
-                paths.append(path)
-#    print paths
-    plt.show()
+    new_graph, new_budget = calculate_path(graph, budget, sorted_demands)
+    money_spent = budget - new_budget
+    print 'Used capacity per link =', cap
+    print 'Max amount of modules per link =', u_max
+    print 'The spent budget =', money_spent

@@ -12,9 +12,8 @@ import numpy
         the algorithm is trying to install modules on the next path
 '''
 
-cap = 5  # module capacity [Gbps]
-# TODO - fix bug with u_max
-u_max = 8  # max number of modules per link are allowed
+cap = 4  # module capacity [Gbps]
+u_max = 10  # max number of modules per link are allowed
 budget = 100000
 
 class NextPath(Exception): pass
@@ -137,15 +136,20 @@ def divide_traffic(graph, paths, tmp_budget):
     # paths - dictionary variable which consists of path, demand and left capacity
     pot_budget = tmp_budget
     try:
+        path_num = 0
         move_to_next_path = 0
         for p in paths:
+            path_num += 1
             try:
                 for i in range(0, len(p['path'])-1):
                     move_to_next_pair = 0
                     modules_no = 1
                     free_cap = graph[p['path'][i]][p['path'][i+1]]['free_cap']
                     if p['demand'] > free_cap:  # if the demand is greater than free capacity on any of the links in the path
-                        lack_of_cap = p['demand'] - free_cap
+                        if path_num==1: #free_cap > 0 and # jesli jest to pierwsza rozwazana sciezka dla danych 2 miast, to oblicz z ogolnego wzoru, jak nie, to wez decreased;aclpfca[...
+                            lack_of_cap = p['demand'] - free_cap
+                        else:
+                            lack_of_cap = decreased_lack_of_cap
                         if move_to_next_path == 1:
                             lack_of_cap = decreased_lack_of_cap
                             move_to_next_path = 0
@@ -167,7 +171,6 @@ def divide_traffic(graph, paths, tmp_budget):
                                     raise NextPath
                                 else:
                                     # these nodes lack of modules - moving to the next pair of nodes on this path
-                                    j = 0
                                     move_to_next_pair = 1
                                     break
                                     # raise NextPairOfNodes

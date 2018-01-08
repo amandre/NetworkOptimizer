@@ -4,7 +4,7 @@ import math
 import numpy
 
 '''
- - capacity = 1 (by default each path could use many edges and may consist of many vertices)
+ - capacity = 5 (by default each path could use many edges and may consist of many vertices)
  - algorithm design:
     > firstly reserves the capacity for the most distant vertices
     > firstly the capacity is reserved for the shortest path

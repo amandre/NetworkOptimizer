@@ -173,7 +173,6 @@ def divide_traffic(graph, paths, tmp_budget):
                                     # these nodes lack of modules - moving to the next pair of nodes on this path
                                     move_to_next_pair = 1
                                     break
-                                    # raise NextPairOfNodes
                             if move_to_next_pair == 1:
                                 move_to_next_pair = 0
                                 break
